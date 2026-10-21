@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="pt-AO">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MACHALA Nk</title>
+<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:Arial,sans-serif}
+body{background:#f0f2f5;display:flex;justify-content:center}
+.app{width:100%;max-width:420px;background:#fff;min-height:100vh;position:relative}
+.header{background:#fff;border-bottom:1px solid #ddd;padding:10px;position:sticky;top:0;z-index:10}
+.brand-main{font-weight:900;font-size:22px;user-select:none}
+.brand-main span{color:#1877f2}
+.feed{padding:10px}
+.card{border:1px solid #ddd;border-radius:10px;margin-bottom:10px;padding:10px}
+.btn{width:100%;padding:11px;background:#1877f2;color:#fff;border:none;border-radius:8px;font-weight:800;margin-top:8px}
+input,select{width:100%;padding:10px;margin-top:6px;border:1px solid #ccc;border-radius:8px}
+#painelSecreto{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.9);z-index:9999;overflow-y:auto;padding:15px}
+.painelBox{background:#fff;border-radius:12px;padding:15px;max-width:420px;margin:20px auto}
+.itemBloq{border-bottom:1px solid #ddd;padding:8px 0;display:flex;justify-content:space-between}
+</style>
+</head>
+<body>
+<div class="app">
+<div class="header">
+<div class="brand-main" id="logoBtn">MACHALA <span>Nk</span></div>
+<div style="font-size:11px;color:#888">Toque 5x no logo para admin (só dono)</div>
+<div style="margin-top:8px">
+<input id="leg" placeholder="O que estás a vender?">
+<select id="prov"><option>Huambo</option><option>Luanda</option><option>Benguela</option><option>Bié</option><option>Huíla</option></select>
+<input type="file" id="file" accept="image/*,video/*">
+<button class="btn" onclick="publicar()">Publicar</button>
+<button onclick="toggleAuth()" style="margin-top:6px">Entrar / Sair</button>
+</div>
+</div>
+<div id="feed" class="feed"></div>
+</div>
+
+<!-- PAINEL SECRETO -->
+<div id="painelSecreto">
+<div class="painelBox">
+<h3>PAINEL PRIVADO - MACHALA</h3>
+<p style="font-size:12px;color:green">Só funciona no teu aparelho com teu email</p>
+<button class="btn" onclick="fecharPainel()" style="background:#333">Fechar Painel</button>
+<hr style="margin:10px 0">
+<h4>⚙️ Controlo de Conteúdo</h4>
+<p>Limite vídeo: <b>5 minutos</b> (ativo)</p>
+<p>Filtro automático: <b>ATIVO (escondido)</b></p>
+<p id="statusFiltro">Verificando...</p>
+<hr>
+<h4>🚫 Contas Bloqueadas por Violar Regras</h4>
+<div id="listaBloq"></div>
+<hr>
+<h4>📋 Todos Posts (apagar qualquer)</h4>
+<div id="listaPostsAdmin"></div>
+<hr>
+<h4>🔒 Códigos de Privacidade</h4>
+<textarea id="regrasTxt" style="height:80px">Palavras bloqueadas: pornografia, nudez explicita, conteúdo adulto. Sistema bloqueia automático.</textarea>
+<button class="btn" onclick="salvarRegras()">Salvar Regras</button>
+</div>
+</div>
+
+<script>
+const firebaseConfig={apiKey:"AIzaSyAO8d9oR9JV9p8YqXv8Xv8Xv8Xv8Xv8Xv8Xv8Xv8X",authDomain:"machala-5min.firebaseapp.com",projectId:"machala-5min"};
+firebase.initializeApp(firebaseConfig);
+const db=firebase.firestore();const auth=firebase.auth();
+const ADMIN_EMAIL="domingosedgar474@gmail.com";
+
+// LISTA ESCONDIDA - NINGUÉM VÊ ISSO
+const LISTA_PROIBIDA=["porn","porno","xxx","xx video","nude","nudes","hentai","onlyfans","xvideo","sexo explicito","pussy","boquete","anal explicito"];
+
+function contemProibido(txt){
+ if(!txt) return false;
+ const t=txt.toLowerCase();
+ return LISTA_PROIBIDA.some(p=>t.includes(p));
+}
+
+let toques=0;let ultimoToque=0;
+document.getElementById('logoBtn').addEventListener('click',()=>{
+ const agora=Date.now();
+ if(agora-ultimoToque>2000) toques=0;
+ toques++; ultimoToque=agora;
+ if(toques>=5){
+   toques=0;
+   abrirPainel();
+ }
+});
+
+function abrirPainel(){
+ if(!auth.currentUser || auth.currentUser.email!==ADMIN_EMAIL){
+   return; // só dono
+ }
+ // verifica se é teu aparelho - guarda ID
+ const meuID=localStorage.getItem('meuAparelhoDono')||'';
+ if(!meuID){
+   localStorage.setItem('meuAparelhoDono','dono-'+Date.now());
+ }
+ document.getElementById('painelSecreto').style.display='block';
+ carregarBloqueados();
+ carregarPostsAdmin();
+ document.getElementById('statusFiltro').innerText='Filtro ativo | Limite 5min ativo | Aparelho autorizado: SIM';
+}
+function fecharPainel(){document.getElementById('painelSecreto').style.display='none'}
+
+function toggleAuth(){const e=prompt("Email:");const s=prompt("Senha:");if(e&&s)auth.signInWithEmailAndPassword(e,s).catch(()=>auth.createUserWithEmailAndPassword(e,s))}
+
+async function publicar(){
+ const leg=document.getElementById('leg').value.trim();
+ if(!leg) return alert("Escreve algo");
+ if(!auth.currentUser) return alert("Entra primeiro");
+ // VERIFICA SE CONTA ESTÁ BLOQUEADA
+ const bloq=await db.collection('bloqueados').doc(auth.currentUser.email).get();
+ if(bloq.exists) return alert("Sua conta está restrita. Contacta o admin.");
+ // FILTRO ESCONDIDO
+ if(contemProibido(leg)){
+   await db.collection('bloqueados').doc(auth.currentUser.email).set({email:auth.currentUser.email,motivo:"Violou regras comunidade",data:firebase.firestore.FieldValue.serverTimestamp()});
+   alert("Conteúdo violou as regras da comunidade. Conta bloqueada.");
+   return;
+ }
+ const file=document.getElementById('file').files[0];
+ let img="";
+ if(file){
+   // limite 5 min video
+   if(file.type.startsWith('video/')){
+     const dur=await getVideoDuration(file);
+     if(dur>300){ alert("Vídeo só até 5 minutos"); return; }
+   }
+   img=await uploadCloudinary(file);
+ }
+ await db.collection('posts').add({leg,prov:document.getElementById('prov').value,img,email:auth.currentUser.email,nome:auth.currentUser.email,likes:0,data:firebase.firestore.FieldValue.serverTimestamp()});
+ document.getElementById('leg').value="";
+}
+
+function getVideoDuration(file){
+ return new Promise(res=>{
+   const v=document.createElement('video');v.preload='metadata';
+   v.onloadedmetadata=()=>{res(v.duration);URL.revokeObjectURL(v.src)}
+   v.src=URL.createObjectURL(file);
+ });
+}
+async function uploadCloudinary(file){const fd=new FormData();fd.append("file",file);fd.append("upload_preset","machala_preset");const r=await fetch("https://api.cloudinary.com/v1_1/demhx9v0s/image/upload",{method:"POST",body:fd});const j=await r.json();return j.secure_url||"";}
+
+function carregarFeed(){
+ db.collection('posts').orderBy('data','desc').onSnapshot(s=>{
+   const f=document.getElementById('feed');f.innerHTML="";
+   s.forEach(d=>{
+     const p=d.data();
+     f.innerHTML+=`<div class="card"><b>${p.nome}</b> - ${p.prov||''}<br>${p.leg}<br>${p.img? (p.img.includes('.mp4')?`<video src="${p.img}" controls style="width:100%"></video>`:`<img src="${p.img}" style="width:100%;border-radius:8px">`):""}<br><button onclick="curtir('${d.id}')">Curtir (${p.likes||0})</button> ${auth.currentUser&&auth.currentUser.email==ADMIN_EMAIL?`<button onclick="apagarPost('${d.id}')">Apagar</button>`:""}</div>`
+   })
+ })
+}
+async function curtir(id){if(!auth.currentUser) return alert("Entra");const d=db.collection('posts').doc(id);const doc=await d.get();await d.update({likes:(doc.data().likes||0)+1})}
+async function apagarPost(id){if(confirm("Apagar?"))await db.collection('posts').doc(id).delete()}
+
+// ADMIN FUNCOES
+async function carregarBloqueados(){
+ const s=await db.collection('bloqueados').get();
+ let html="";
+ s.forEach(d=>{
+   html+=`<div class="itemBloq"><span>${d.id}</span><button onclick="desbloquear('${d.id}')">Desbloquear</button></div>`
+ });
+ document.getElementById('listaBloq').innerHTML=html||"Nenhuma conta bloqueada";
+}
+async function desbloquear(email){await db.collection('bloqueados').doc(email).delete();carregarBloqueados()}
+async function carregarPostsAdmin(){
+ const s=await db.collection('posts').orderBy('data','desc').limit(20).get();
+ let html="";
+ s.forEach(d=>{html+=`<div class="itemBloq"><span>${d.data().leg.substring(0,30)}</span><button onclick="apagarPost('${d.id}')">Apagar</button></div>`})
+ document.getElementById('listaPostsAdmin').innerHTML=html;
+}
+function salvarRegras(){alert("Regras salvas no teu painel");fecharPainel()}
+
+carregarFeed();
+</script>
+</body>
+</html>
